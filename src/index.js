@@ -118,6 +118,8 @@ const buildDatabase = async (schema) => {
     if (!(databaseTable.tableName === 'dataConnections_dataEntities' 
     || databaseTable.tableName === 'dataConnections_integrationTechnologies' 
     || databaseTable.tableName === 'technologyMetricAssessments_assessments' 
+    || databaseTable.tableName === 'componentConnections_tags'
+    || databaseTable.tableName === 'capabilities_valueChainSegments' 
     || databaseTable.tableName === 'networkConnections_technologies')){
       // todo, handle multiple fk
     for await (const tf of databaseTable.tableFields) {
