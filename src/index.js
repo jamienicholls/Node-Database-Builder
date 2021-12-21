@@ -8,39 +8,32 @@ const getDatabaseTableFieldSchema = (tableName, tables, joiFields) => {
   Object.getOwnPropertyNames(joiFields).forEach(joiField => {
     const field = joiFields[joiField];
     if (field.type === 'array') {
-      if (field.items && field.items[0].keys) {
-        const childTableFields = getDatabaseTableFieldSchema(`${tableName}_${joiField}`, tables, field.items[0].keys, field);
-        Object.getOwnPropertyNames(joiFields).forEach(joiField => {
-          const field = joiFields[joiField];
-          if ((field.rules || [] ).find(rule => rule.name === 'pk')){
-            childTableFields.push({
-              fieldName: joiField,
-              type: field.type,
-              primaryKey: false,
-              forginKey: `${tableName}.[].${joiField}`,
-            });
-          }
-        });
-        tables.push({
-          tableName: `${tableName}_${joiField}`,
-          tableFields: childTableFields,
-        });
-      } else {
-        console.log('FIXXXXXXXXXXXXXXXXXXXXXXXXX');
-        tables.push({
-          tableName: `${tableName}_${joiField}`,
-          tableFields: getDatabaseTableFieldSchema(`${tableName}_${joiField}`, tables, { value: { type: 'string' } }),
-        });
-      }
+      const joiChildFields = (field.items[0] && field.items[0].keys) ? field.items[0].keys : { value: { type: 'string' } };
+      const childTableFields = getDatabaseTableFieldSchema(`${tableName}_${joiField}`, tables, joiChildFields, field);
+      // Iterate through each field in parent table and add the primary keys to the link table
+      Object.getOwnPropertyNames(joiFields).forEach(joiField => {
+        const field = joiFields[joiField];
+        if ((field.rules || [] ).find(rule => rule.name === 'pk')){
+          childTableFields.push({
+            fieldName: joiField,
+            type: field.type,
+            primaryKey: true,
+            foreignKey: `${tableName}.[].${joiField}`,
+          });
+        }
+      });
+      tables.push({
+        tableName: `${tableName}_${joiField}`,
+        tableFields: childTableFields,
+      });
     } else {
       tableFields.push({
         fieldName: joiField,
         type: field.type,
         primaryKey: (field.rules || []).find(rule => rule.name === 'pk') ? true : false,
-        forginKey: (field.rules || []).find(rule => rule.name === 'fk') ? (field.rules || []).find(rule => rule.name === 'fk').args.path : null,
+        foreignKey: (field.rules || []).find(rule => rule.name === 'fk') ? (field.rules || []).find(rule => rule.name === 'fk').args.path : null,
       });
     }
-
   });
   return tableFields;
 }
@@ -129,12 +122,12 @@ const buildDatabase = async (schema) => {
       // todo, handle multiple fk
     for await (const tf of databaseTable.tableFields) {
       await db.schema.alterTable(databaseTable.tableName, table => {
-        if (tf.forginKey) {
-          let tableName = tf.forginKey.split('.[].')[0];
-          let tableReferenece = tf.forginKey.split('.[].')[1];
-          if (tf.forginKey.split('.[].').length === 3) {
-            tableName = `${tf.forginKey.split('.[].')[0]}_${tf.forginKey.split('.[].')[1]}`;
-            tableReferenece = tf.forginKey.split('.[].')[2];
+        if (tf.foreignKey) {
+          let tableName = tf.foreignKey.split('.[].')[0];
+          let tableReferenece = tf.foreignKey.split('.[].')[1];
+          if (tf.foreignKey.split('.[].').length === 3) {
+            tableName = `${tf.foreignKey.split('.[].')[0]}_${tf.foreignKey.split('.[].')[1]}`;
+            tableReferenece = tf.foreignKey.split('.[].')[2];
           }
 
           console.log(`Adding reference on (${tf.fieldName}) to (${tableReferenece}) in table (${tableName}) for table (${databaseTable.tableName})`)
