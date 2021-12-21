@@ -4,45 +4,60 @@ import config from './config.js';
 
 const getDatabaseTableFieldSchema = (tableName, tables, joiFields) => {
   const tableFields = [];
+  // Iterate through each field for current table
   Object.getOwnPropertyNames(joiFields).forEach(joiField => {
     const field = joiFields[joiField];
-
     if (field.type === 'array') {
       if (field.items && field.items[0].keys) {
+        const childTableFields = getDatabaseTableFieldSchema(`${tableName}_${joiField}`, tables, field.items[0].keys, field);
+        Object.getOwnPropertyNames(joiFields).forEach(joiField => {
+          const field = joiFields[joiField];
+          if ((field.rules || [] ).find(rule => rule.name === 'pk')){
+            childTableFields.push({
+              fieldName: joiField,
+              type: field.type,
+              primaryKey: false,
+              forginKey: `${tableName}.[].${joiField}`,
+            });
+          }
+        });
         tables.push({
           tableName: `${tableName}_${joiField}`,
-          tableFields: getDatabaseTableFieldSchema(`${tableName}_${joiField}`, tables, field.items[0].keys),
+          tableFields: childTableFields,
         });
       } else {
+        console.log('FIXXXXXXXXXXXXXXXXXXXXXXXXX');
         tables.push({
           tableName: `${tableName}_${joiField}`,
           tableFields: getDatabaseTableFieldSchema(`${tableName}_${joiField}`, tables, { value: { type: 'string' } }),
         });
       }
+    } else {
+      tableFields.push({
+        fieldName: joiField,
+        type: field.type,
+        primaryKey: (field.rules || []).find(rule => rule.name === 'pk') ? true : false,
+        forginKey: (field.rules || []).find(rule => rule.name === 'fk') ? (field.rules || []).find(rule => rule.name === 'fk').args.path : null,
+      });
     }
-    tableFields.push({
-      fieldName: joiField,
-      type: field.type,
-      unique: field.type === 'array' ? true : false,
-      primaryKey: (field.rules || []).find(rule => rule.name === 'pk') ? true : false,
-      forginKey: (field.rules || []).find(rule => rule.name === 'fk') ? (field.rules || []).find(rule => rule.name === 'fk').args.path : null,
-      ...field,
-    });
+
   });
   return tableFields;
 }
 
-const getDatabaseTableSchema = (tables) => {
+const getDatabaseTableSchema = () => {
+  let tables = [];
   const joiSchemaDescription = schema.describe();
   Object.getOwnPropertyNames(joiSchemaDescription.keys)
-    .forEach(fieldGroupName => {
-      const joiFields = joiSchemaDescription.keys[fieldGroupName].items[0].keys;
-      const tableFields = getDatabaseTableFieldSchema(fieldGroupName, tables, joiFields);
+    .forEach(tableName => {
+      const joiFields = joiSchemaDescription.keys[tableName].items[0].keys;
+      const tableFields = getDatabaseTableFieldSchema(tableName, tables, joiFields);
       tables.push({
-        tableName: fieldGroupName,
+        tableName: tableName,
         tableFields: tableFields,
       });
     });
+  return tables;
 }
 
 
@@ -65,14 +80,20 @@ const createTableField = (tf, table) => {
   }
 }
 
-const buildDatabase = async () => {
+
+const buildDatabase = async (schema) => {
+  // Create Database Connection
   const db = Knex({
     client: 'mssql',
     connection: config.connection,
   });
 
-  const databaseTables = [];
-  getDatabaseTableSchema(databaseTables);
+  // Get tables object
+  const schemaDescription = schema.describe();
+  const databaseTables = getDatabaseTableSchema(schemaDescription);
+  console.log(databaseTables);
+
+
   // Build database tables
   for await (const databaseTable of databaseTables) {
     const tableExists = await db.schema.hasTable(databaseTable.tableName);
@@ -101,6 +122,11 @@ const buildDatabase = async () => {
   };
   // Add forgin keys
   for await (const databaseTable of databaseTables) {
+    if (!(databaseTable.tableName === 'dataConnections_dataEntities' 
+    || databaseTable.tableName === 'dataConnections_integrationTechnologies' 
+    || databaseTable.tableName === 'technologyMetricAssessments_assessments' 
+    || databaseTable.tableName === 'networkConnections_technologies')){
+      // todo, handle multiple fk
     for await (const tf of databaseTable.tableFields) {
       await db.schema.alterTable(databaseTable.tableName, table => {
         if (tf.forginKey) {
@@ -116,11 +142,12 @@ const buildDatabase = async () => {
         }
       })
     }
+  }
   };
 
   db.destroy();
 }
 
-await buildDatabase();
+await buildDatabase(schema);
 
 
